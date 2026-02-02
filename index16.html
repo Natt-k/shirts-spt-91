@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบสั่งจองเสื้อรุ่น 91</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom": "https://esm.sh/react-dom@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0", 
+            "lucide-react": "https://esm.sh/lucide-react@0.303.0?deps=react@18.2.0",
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+            "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+        }
+    }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;700&display=swap');
+        
+        body { font-family: 'Sarabun', sans-serif; }
+
+        /* Print Styles */
+        @media print {
+            body, html, #root, main {
+                visibility: hidden;
+                overflow: visible !important;
+                height: auto !important;
+                width: auto !important;
+                background: white !important;
+                position: static !important;
+            }
+            .print-container, .print-container * { visibility: visible; }
+            .print-container {
+                position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0;
+                background: white !important; color: black !important;
+                box-shadow: none !important; border-radius: 0 !important;
+                min-height: auto !important;
+            }
+            .no-print, #loading, #error-box, aside, header { display: none !important; }
+            .page-break { page-break-after: always; }
+            .break-inside-avoid { break-inside: avoid; }
+            table { width: 100% !important; border-collapse: collapse !important; }
+            th, td { border: 1px solid #000 !important; padding: 4px !important; }
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+        
+        .animate-bounce-in { animation: bounce-in 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards; }
+        @keyframes bounce-in { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen overflow-hidden">
+    
+    <div id="loading" class="fixed inset-0 flex items-center justify-center bg-slate-900 z-50">
+        <div class="text-center">
+            <div class="w-16 h-16 border-4 border-pink-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p class="text-slate-400 animate-pulse">กำลังโหลดระบบ...</p>
+        </div>
+    </div>
+
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module" data-presets="react">
+        import React, { useState, useEffect, useMemo, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, doc, deleteDoc, updateDoc, writeBatch } from 'firebase/firestore';
+        import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
+        import { LogOut, User, LayoutDashboard, Printer, Plus, Trash2, Search, AlertCircle, CheckCircle, Shirt, Users, Layers, Upload, FileUp, FileSpreadsheet, Image as ImageIcon, FileText, Edit, X, Loader, Type } from 'lucide-react';
+
+        const hideLoading = () => {
+            const el = document.getElementById('loading');
+            if(el) el.style.display = 'none';
+        };
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBjRQMJB8ZpUOSTrZvNlRej3ue2CytGKFw",
+            authDomain: "shirts-spt-604-91.firebaseapp.com",
+            projectId: "shirts-spt-604-91",
+            storageBucket: "shirts-spt-604-91.firebasestorage.app",
+            messagingSenderId: "698582622271",
+            appId: "1:698582622271:web:561490678b7cdbb2d4188a",
+            measurementId: "G-3B0LL7LC3Z"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const SIZES = ['SS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
+        const NUMBER_OPTIONS = Array.from({length: 60}, (_, i) => (i + 1).toString());
+        const BACK_STYLES = [
+            { id: 'none', label: 'ไม่ใส่เลข' },
+            { id: 'number', label: 'ใส่เลขที่ (1, 2, 3, ...)' },
+            { id: 'room', label: 'ใส่เลขห้อง (เช่น 4)' },
+            { id: 'grade_room', label: 'ใส่เลขระดับชั้นและห้อง (เช่น 64)' },
+            { id: 'batch', label: 'ใส่เลขรุ่น (91)' },
+        ];
+        const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#ff7300'];
+
+        const normalizeNumber = (num) => {
+            const parsed = parseInt(num, 10);
+            return isNaN(parsed) ? num : parsed.toString();
+        };
+
+        const splitCSVLine = (line) => {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    result.push(current.trim().replace(/^"|"$/g, ''));
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            result.push(current.trim().replace(/^"|"$/g, ''));
+            return result;
+        };
+
+        const Login = ({ onLoginSuccess }) => {
+            const [isRegistering, setIsRegistering] = useState(false);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                setError('');
+                try {
+                    if (isRegistering) {
+                        await createUserWithEmailAndPassword(auth, email, password);
+                    } else {
+                        await signInWithEmailAndPassword(auth, email, password);
+                    }
+                    onLoginSuccess();
+                } catch (err) {
+                    setError(err.message);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 font-sans text-white p-4">
+                    <div className="w-full max-w-md p-8 rounded-3xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl">
+                        <div className="text-center mb-8">
+                            <div className="w-20 h-20 mx-auto bg-gradient-to-tr from-pink-500 to-violet-500 rounded-2xl flex items-center justify-center shadow-lg mb-4 transform rotate-3">
+                                <Shirt size={40} className="text-white" />
+                            </div>
+                            <h1 className="text-3xl font-bold tracking-tight">Shirt Order System</h1>
+                            <p className="text-white/60 mt-2">ระบบสั่งจองเสื้อรุ่น 91</p>
+                        </div>
+                        <form onSubmit={handleAuth} className="space-y-6">
+                            <div>
+                                <label className="block text-sm font-medium text-white/80 mb-2">อีเมล</label>
+                                <input type="email" required className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-pink-500 focus:ring-2 focus:ring-pink-500/50 outline-none transition-all text-white placeholder-white/30" placeholder="admin@school.ac.th" value={email} onChange={(e) => setEmail(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-white/80 mb-2">รหัสผ่าน</label>
+                                <input type="password" required className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-pink-500 focus:ring-2 focus:ring-pink-500/50 outline-none transition-all text-white placeholder-white/30" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+                            </div>
+                            {error && <div className="p-3 rounded-lg bg-red-500/20 border border-red-500/50 text-red-200 text-sm flex items-center gap-2"><AlertCircle size={16} /> {error}</div>}
+                            <button type="submit" className="w-full py-3.5 rounded-xl bg-gradient-to-r from-pink-500 to-violet-600 hover:from-pink-400 hover:to-violet-500 text-white font-semibold shadow-lg shadow-pink-500/30 transition-all active:scale-95">{isRegistering ? 'ลงทะเบียนผู้ดูแล' : 'เข้าสู่ระบบ'}</button>
+                        </form>
+                        <div className="mt-6 text-center"><button onClick={() => setIsRegistering(!isRegistering)} className="text-sm text-white/50 hover:text-white transition-colors">{isRegistering ? 'มีบัญชีอยู่แล้ว? เข้าสู่ระบบ' : 'ยังไม่มีบัญชี? ลงทะเบียนใหม่'}</button></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [printView, setPrintView] = useState('production');
+            const [students, setStudents] = useState([]);
+            const [orders, setOrders] = useState([]);
+            const [editingId, setEditingId] = useState(null);
+            const [formStudent, setFormStudent] = useState({ studentId: '', title: 'ด.ช.', firstName: '', lastName: '', grade: '', room: '', number: '1' });
+            
+            const [formOrder, setFormOrder] = useState({ 
+                studentId: '', title: 'Mr.', engName: '', engSurname: '', number: '1', size: 'M', backStyle: 'none', isUppercase: true 
+            });
+            
+            const [forceUppercase, setForceUppercase] = useState(false);
+
+            const [submitStatus, setSubmitStatus] = useState({type: '', msg: ''});
+            const [isExporting, setIsExporting] = useState(false);
+            const studentFileRef = useRef(null);
+            const orderFileRef = useRef(null);
+
+            useEffect(() => { const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => { setUser(currentUser); setLoading(false); }); return () => unsubscribeAuth(); }, []);
+            useEffect(() => { if (!user) return; const unsubStudents = onSnapshot(collection(db, 'students'), (snapshot) => { setStudents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); }); const unsubOrders = onSnapshot(query(collection(db, 'orders'), orderBy('timestamp', 'desc')), (snapshot) => { setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); }); return () => { unsubStudents(); unsubOrders(); }; }, [user]);
+
+            const getOrderStatus = (studentId) => orders.some(o => o.studentId === studentId);
+            const findStudentForOrder = (order) => { if (!students || students.length === 0) return null; if (order.studentId) { const byId = students.find(s => s.studentId === order.studentId); if (byId) return byId; } return students.find(s => String(s.number).trim() === String(order.number).trim()); };
+            const findOrderForStudent = (student) => { if (!orders || orders.length === 0) return null; if (student.studentId) { const byId = orders.find(o => o.studentId === student.studentId); if (byId) return byId; } return orders.find(o => String(o.number).trim() === String(student.number).trim()); };
+            const getBackDetail = (o, st) => { if (!o) return '-'; if (o.backStyle === 'none') return '-'; if (o.backStyle === 'number') return o.number; if (o.backStyle === 'room') return st?.room || '-'; if (o.backStyle === 'grade_room') return st ? `${st.grade}${st.room}` : '-'; if (o.backStyle === 'batch') return '91'; return '-'; };
+            
+            const getScreenName = (order) => {
+                const name = order.engName || '';
+                return (forceUppercase || order.isUppercase) ? name.toUpperCase() : name;
+            };
+
+            const handleAddStudent = async (e) => { e.preventDefault(); if (!formStudent.studentId || !formStudent.firstName) return; try { if (students.some(s => s.studentId === formStudent.studentId)) { setSubmitStatus({ type: 'error', msg: 'รหัสนักเรียนนี้มีในระบบแล้ว' }); return; } await addDoc(collection(db, 'students'), formStudent); setFormStudent({ studentId: '', title: 'ด.ช.', firstName: '', lastName: '', grade: '', room: '', number: '1' }); setSubmitStatus({ type: 'success', msg: 'เพิ่มรายชื่อสำเร็จ' }); } catch (error) { setSubmitStatus({ type: 'error', msg: 'เกิดข้อผิดพลาด' }); } };
+            
+            const handleSaveOrder = async (e) => { 
+                e.preventDefault(); 
+                try { 
+                    const duplicate = orders.find(o => o.studentId === formOrder.studentId && formOrder.studentId !== '' && o.id !== editingId); 
+                    if (duplicate) { setSubmitStatus({ type: 'error', msg: `นักเรียนรหัส ${formOrder.studentId} สั่งซื้อไปแล้ว` }); return; } 
+                    if (!formOrder.studentId) { const dupName = orders.find(o => o.engName.toLowerCase() === formOrder.engName.toLowerCase() && o.engSurname.toLowerCase() === formOrder.engSurname.toLowerCase() && o.id !== editingId); if (dupName) { setSubmitStatus({ type: 'error', msg: `ชื่อ ${formOrder.engName} มีการสั่งซื้อแล้ว` }); return; } } 
+                    const studentInfo = students.find(s => s.studentId === formOrder.studentId); 
+                    const orderData = { ...formOrder, thaiName: studentInfo ? studentInfo.firstName : '', thaiSurname: studentInfo ? studentInfo.lastName : '', }; 
+                    if (editingId) { await updateDoc(doc(db, 'orders', editingId), orderData); setSubmitStatus({ type: 'success', msg: 'แก้ไขสำเร็จ' }); setEditingId(null); } 
+                    else { await addDoc(collection(db, 'orders'), { ...orderData, timestamp: new Date() }); setSubmitStatus({ type: 'success', msg: 'บันทึกสำเร็จ' }); } 
+                    setFormOrder({ studentId: '', title: 'Mr.', engName: '', engSurname: '', number: '1', size: 'M', backStyle: 'none', isUppercase: true }); 
+                } catch (error) { setSubmitStatus({ type: 'error', msg: 'บันทึกไม่สำเร็จ' }); } 
+            };
+            
+            const handleEditOrder = (order) => { 
+                setEditingId(order.id); 
+                setFormOrder({ 
+                    studentId: order.studentId || '', 
+                    title: order.title || 'Mr.', 
+                    engName: order.engName, 
+                    engSurname: order.engSurname, 
+                    number: order.number, 
+                    size: order.size, 
+                    backStyle: order.backStyle,
+                    isUppercase: order.isUppercase === undefined ? true : order.isUppercase // Default to true if undefined
+                }); 
+                window.scrollTo({ top: 0, behavior: 'smooth' }); 
+            };
+            
+            const handleCancelEdit = () => { setEditingId(null); setFormOrder({ studentId: '', title: 'Mr.', engName: '', engSurname: '', number: '1', size: 'M', backStyle: 'none', isUppercase: true }); };
+            const handleDeleteOrder = async (id) => { if(confirm('ยืนยันการลบ?')) await deleteDoc(doc(db, 'orders', id)); };
+            
+            const handleStudentImport = (e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async (event) => { try { const text = event.target?.result; const rows = text.split('\n'); let count = 0; const batch = writeBatch(db); for (let rowStr of rows) { if(!rowStr.trim()) continue; const cols = splitCSVLine(rowStr); if(cols.length < 7) continue; const [id, title, fname, lname, grade, room, num] = cols; if (!id || id.includes('เลขประจำตัว')) continue; const cleanNum = normalizeNumber(num); if (!students.some(s => s.studentId === id)) { const newRef = doc(collection(db, 'students')); batch.set(newRef, { studentId: id, title: title||'', firstName: fname||'', lastName: lname||'', grade: grade||'', room: room||'', number: cleanNum||'' }); count++; } } if (count > 0) { await batch.commit(); setSubmitStatus({ type: 'success', msg: `นำเข้า ${count} รายชื่อ` }); } else { setSubmitStatus({ type: 'error', msg: 'ไม่พบข้อมูลใหม่' }); } } catch (error) { setSubmitStatus({ type: 'error', msg: 'Error' }); } if (studentFileRef.current) studentFileRef.current.value = ''; }; reader.readAsText(file); };
+            const handleOrderImport = (e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async (event) => { try { const text = event.target?.result; const rows = text.split('\n'); let count = 0; const batch = writeBatch(db); for (let i = 0; i < rows.length; i++) { if(!rows[i].trim()) continue; const cols = splitCSVLine(rows[i]); if (cols.length < 8) continue; const title = cols[2]; const engName = cols[3]; const engSurname = cols[4]; let number = cols[5]; const size = cols[6]; const backStyleText = cols[7] || ''; if (!engName || engName === 'ชื่อ(ภาษาอังกฤษ)') continue; number = normalizeNumber(number); const exists = orders.some(o => o.engName.toLowerCase() === engName.toLowerCase() && o.engSurname.toLowerCase() === engSurname.toLowerCase()); if (!exists) { let backStyle = 'none'; if (backStyleText.includes('ไม่ใส่')) backStyle = 'none'; else if (backStyleText.includes('เลขที่')) backStyle = 'number'; else if (backStyleText.includes('เลขห้อง')) backStyle = 'room'; else if (backStyleText.includes('ชั้น') || backStyleText.includes('64')) backStyle = 'grade_room'; else if (backStyleText.includes('รุ่น') || backStyleText.includes('91')) backStyle = 'batch'; const linkedStudent = students.find(s => String(s.number).trim() === String(number).trim()); const newRef = doc(collection(db, 'orders')); batch.set(newRef, { studentId: linkedStudent ? linkedStudent.studentId : '', title: title, engName: engName, engSurname: engSurname, number: number, size: size, backStyle: backStyle, thaiName: linkedStudent ? linkedStudent.firstName : '', thaiSurname: linkedStudent ? linkedStudent.lastName : '', isUppercase: true, timestamp: new Date(Date.now() + i * 100) }); count++; } } if (count > 0) { await batch.commit(); setSubmitStatus({ type: 'success', msg: `นำเข้า ${count} รายการ` }); } else { setSubmitStatus({ type: 'error', msg: 'ไม่พบรายการใหม่' }); } } catch (error) { setSubmitStatus({ type: 'error', msg: 'Error' }); } if (orderFileRef.current) orderFileRef.current.value = ''; }; reader.readAsText(file); };
+
+            // --- Export Functions ---
+            const handleExportCSV = () => {
+                let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; 
+                if (printView === 'production') {
+                    csvContent += "Size,No.,Screen Name,Back Number,Note\n";
+                    SIZES.forEach(size => {
+                        const sizeOrders = orders.filter(o => o.size === size);
+                        if (sizeOrders.length > 0) {
+                            sizeOrders.forEach((o, index) => {
+                                const st = findStudentForOrder(o);
+                                const back = getBackDetail(o, st);
+                                const screenName = getScreenName(o);
+                                csvContent += `"${size}","${index + 1}","${screenName}","${back}",""\n`;
+                            });
+                        }
+                    });
+                } else if (printView === 'namelist') {
+                    csvContent += "Number,Thai Name,Size,Screen Name,Back Number,Signature\n";
+                    const sorted = [...orders].sort((a,b) => parseInt(a.number) - parseInt(b.number));
+                    sorted.forEach(o => {
+                        const st = findStudentForOrder(o);
+                        let thai = st ? `${st.title}${st.firstName} ${st.lastName}` : (o.thaiName ? `${o.thaiName} ${o.thaiSurname||''}` : '-');
+                        const back = getBackDetail(o, st);
+                        const screenName = getScreenName(o);
+                        csvContent += `"${o.number}","${thai}","${o.size}","${screenName}","${back}",""\n`;
+                    });
+                } else if (printView === 'class_all') {
+                    csvContent += "Number,Thai Name,Size,Screen Name,Back Number,Status\n";
+                    [...students].sort((a,b) => parseInt(a.number) - parseInt(b.number)).forEach(st => {
+                        const o = findOrderForStudent(st);
+                        const thai = `${st.title}${st.firstName} ${st.lastName}`;
+                        if (o) {
+                            const back = getBackDetail(o, st);
+                            const screenName = getScreenName(o);
+                            csvContent += `"${st.number}","${thai}","${o.size}","${screenName}","${back}","Paid"\n`;
+                        } else {
+                            csvContent += `"${st.number}","${thai}","-","-","-","Unpaid"\n`;
+                        }
+                    });
+                } else if (printView === 'missing') {
+                    csvContent += "Number,Thai Name,Grade/Room\n";
+                    [...students].sort((a,b) => parseInt(a.number) - parseInt(b.number)).forEach(st => {
+                        if (!findOrderForStudent(st)) {
+                            const thai = `${st.title}${st.firstName} ${st.lastName}`;
+                            csvContent += `"${st.number}","${thai}","${st.grade}/${st.room}"\n`;
+                        }
+                    });
+                } else if (printView === 'size_summary') {
+                    csvContent += "Size,Screen Name,Back Number\n";
+                    SIZES.forEach(size => {
+                        const sizeOrders = orders.filter(o => o.size === size);
+                        if(sizeOrders.length > 0) {
+                            csvContent += `--- SIZE: ${size} (${sizeOrders.length}) ---\n`;
+                            sizeOrders.forEach(o => {
+                                const st = findStudentForOrder(o);
+                                const back = getBackDetail(o, st);
+                                const screenName = getScreenName(o);
+                                csvContent += `"${size}","${screenName}","${back}"\n`;
+                            });
+                        }
+                    });
+                    csvContent += "\n--- SUMMARY ---\nSize,Count\n";
+                    SIZES.forEach(size => {
+                        const c = orders.filter(o => o.size === size).length;
+                        if(c>0) csvContent += `"${size}",${c}\n`;
+                    });
+                    csvContent += `Total,${orders.length}\n`;
+                } else if (printView === 'back_style') {
+                    csvContent += "Back Style,Screen Name,Size,Back Detail\n";
+                    BACK_STYLES.forEach(style => {
+                        const styleOrders = orders.filter(o => o.backStyle === style.id);
+                        if(styleOrders.length > 0) {
+                            csvContent += `--- Style: ${style.label} (${styleOrders.length}) ---\n`;
+                            styleOrders.forEach(o => {
+                                const st = findStudentForOrder(o);
+                                const back = getBackDetail(o, st);
+                                const name = getScreenName(o);
+                                csvContent += `"${style.label}","${name}","${o.size}","${back}"\n`;
+                            });
+                        }
+                    });
+                }
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", `report_${printView}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const handleExportImage = async () => {
+                const element = document.querySelector('.print-container');
+                if (!element) return;
+                const originalScrollY = window.scrollY;
+                const originalMinHeight = element.style.minHeight;
+                const originalShadow = element.style.boxShadow;
+                const originalRounded = element.style.borderRadius;
+                window.scrollTo(0, 0);
+                element.style.minHeight = 'auto'; 
+                element.style.boxShadow = 'none';
+                element.style.borderRadius = '0';
+                try {
+                    const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true, scrollY: 0, scrollX: 0 });
+                    const link = document.createElement('a');
+                    link.download = `report_${printView}.png`;
+                    link.href = canvas.toDataURL();
+                    link.click();
+                } catch (err) { alert("Error: " + err.message); }
+                finally { element.style.minHeight = originalMinHeight; element.style.boxShadow = originalShadow; element.style.borderRadius = originalRounded; window.scrollTo(0, originalScrollY); }
+            };
+
+            // --- PDF Generation ---
+            const loadThaiFont = async (doc) => {
+                try {
+                    const ttfUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/sarabun/Sarabun-Regular.ttf';
+                    const res = await fetch(ttfUrl);
+                    if (!res.ok) throw new Error('Font fetch failed');
+                    const blob = await res.blob();
+                    return new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const base64data = reader.result.split(',')[1];
+                            doc.addFileToVFS('Sarabun-Regular.ttf', base64data);
+                            doc.addFont('Sarabun-Regular.ttf', 'Sarabun', 'normal');
+                            doc.setFont('Sarabun');
+                            resolve();
+                        };
+                        reader.readAsDataURL(blob);
+                    });
+                } catch (e) {
+                    console.error("Font loading error:", e);
+                    alert("ไม่สามารถโหลดฟอนต์ภาษาไทยได้ การแสดงผลอาจไม่สมบูรณ์");
+                }
+            };
+
+            const handleExportPDF = async () => {
+                setIsExporting(true);
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+
+                await loadThaiFont(doc);
+
+                const dateStr = new Date().toLocaleDateString('th-TH');
+                let title = `รายงานสรุปการสั่งจองเสื้อรุ่น 91 (${dateStr})`;
+                let columns = [];
+                let body = [];
+
+                if (printView === 'production') {
+                    title = "ใบสั่งผลิต (แยกตามไซต์) - " + dateStr;
+                    columns = ['ลำดับ', 'ชื่อสกรีน (Eng)', 'เลขหลัง', 'หมายเหตุ'];
+                    let rows = [];
+                    SIZES.forEach(size => {
+                        const sizeOrders = orders.filter(o => o.size === size);
+                        if (sizeOrders.length > 0) {
+                            rows.push([{ content: `SIZE: ${size} (จำนวน ${sizeOrders.length} ตัว)`, colSpan: 4, styles: { fillColor: [240, 240, 240], fontStyle: 'bold' } }]);
+                            sizeOrders.forEach((o, index) => {
+                                const st = findStudentForOrder(o);
+                                rows.push([index + 1, getScreenName(o), getBackDetail(o, st), '']);
+                            });
+                        }
+                    });
+                    body = rows;
+                } 
+                else if (printView === 'namelist') {
+                    title = "ใบเช็คชื่อผู้สั่งจอง - " + dateStr;
+                    columns = ['เลขที่', 'ชื่อ-สกุล', 'Size', 'ชื่อสกรีน', 'หลัง', 'ลายเซ็น'];
+                    const sorted = [...orders].sort((a,b) => parseInt(a.number) - parseInt(b.number));
+                    body = sorted.map(o => {
+                        const st = findStudentForOrder(o);
+                        const thaiName = st ? `${st.title}${st.firstName} ${st.lastName}` : '-';
+                        return [o.number, thaiName, o.size, getScreenName(o), getBackDetail(o, st), ''];
+                    });
+                }
+                else if (printView === 'class_all') {
+                    title = "รายงานทั้งห้อง (เช็คสถานะ) - " + dateStr;
+                    columns = ['เลขที่', 'ชื่อ-สกุล', 'Size', 'ชื่อสกรีน', 'หลัง', 'สถานะ'];
+                    const sorted = [...students].sort((a,b) => parseInt(a.number) - parseInt(b.number));
+                    body = sorted.map(st => {
+                        const o = findOrderForStudent(st);
+                        const thaiName = `${st.title}${st.firstName} ${st.lastName}`;
+                        return [
+                            st.number, 
+                            thaiName, 
+                            o ? o.size : '-', 
+                            o ? getScreenName(o) : '-', 
+                            o ? getBackDetail(o, st) : '-', 
+                            o ? 'สั่งแล้ว' : 'ยังไม่สั่ง'
+                        ];
+                    });
+                }
+                else if (printView === 'missing') {
+                    title = "รายชื่อผู้ที่ยังไม่สั่งจอง - " + dateStr;
+                    columns = ['เลขที่', 'ชื่อ-สกุล', 'ชั้น/ห้อง', 'หมายเหตุ'];
+                    const sorted = [...students].sort((a,b) => parseInt(a.number) - parseInt(b.number)).filter(st => !findOrderForStudent(st));
+                    body = sorted.map(st => [st.number, `${st.title}${st.firstName} ${st.lastName}`, `ม.${st.grade}/${st.room}`, '']);
+                }
+                else if (printView === 'size_summary') {
+                    title = "รายงานแบบรวมไซต์ (Size Summary) - " + dateStr;
+                    columns = ['#', 'ไซต์', 'ชื่อสกรีน (Eng)', 'เลขหลัง'];
+                    let rows = [];
+                    SIZES.forEach(size => {
+                        const sizeOrders = orders.filter(o => o.size === size);
+                        if (sizeOrders.length > 0) {
+                            rows.push([{ content: `SIZE: ${size}`, colSpan: 4, styles: { fillColor: [220, 220, 220], fontStyle: 'bold' } }]);
+                            sizeOrders.forEach((o, index) => {
+                                const st = findStudentForOrder(o);
+                                rows.push([index + 1, size, getScreenName(o), getBackDetail(o, st)]);
+                            });
+                        }
+                    });
+                    
+                    body = rows;
+                }
+                else if (printView === 'back_style') {
+                    title = "รายงานแยกตามรูปแบบหลังเสื้อ - " + dateStr;
+                    columns = ['ลำดับ', 'ชื่อสกรีน', 'Size', 'เลขหลัง'];
+                    let rows = [];
+                    BACK_STYLES.forEach(style => {
+                        const styleOrders = orders.filter(o => o.backStyle === style.id);
+                        if (styleOrders.length > 0) {
+                            rows.push([{ content: `รูปแบบ: ${style.label} (จำนวน ${styleOrders.length} ตัว)`, colSpan: 4, styles: { fillColor: [220, 220, 220], fontStyle: 'bold' } }]);
+                            styleOrders.forEach((o, index) => {
+                                const st = findStudentForOrder(o);
+                                rows.push([index + 1, getScreenName(o), o.size, getBackDetail(o, st)]);
+                            });
+                        }
+                    });
+                    body = rows;
+                }
+
+                doc.autoTable({
+                    head: [columns],
+                    body: body,
+                    startY: 25,
+                    styles: { font: 'Sarabun', fontSize: 10, cellPadding: 2 },
+                    headStyles: { fillColor: [40, 40, 40], textColor: 255, fontStyle: 'bold' },
+                    columnStyles: { 0: { cellWidth: 15, halign: 'center' } },
+                    didDrawPage: (data) => {
+                        doc.setFontSize(14);
+                        doc.text(title, data.settings.margin.left, 15);
+                        const pageCount = doc.internal.getNumberOfPages();
+                        doc.setFontSize(10);
+                        doc.text('หน้า ' + pageCount, doc.internal.pageSize.width - 20, doc.internal.pageSize.height - 10);
+                    }
+                });
+
+                // Extra Summary Table for 'size_summary' view
+                if (printView === 'size_summary') {
+                    let finalY = doc.lastAutoTable.finalY + 10;
+                    if (finalY > 250) { doc.addPage(); finalY = 20; }
+                    
+                    doc.text("สรุปจำนวนรวม", 14, finalY);
+                    
+                    const summaryData = SIZES.map(size => {
+                        const count = orders.filter(o => o.size === size).length;
+                        if(count === 0) return null;
+                        return [size, count];
+                    }).filter(Boolean);
+                    summaryData.push(['รวมทั้งหมด', orders.length]);
+
+                    doc.autoTable({
+                        head: [['ไซต์', 'จำนวน']],
+                        body: summaryData,
+                        startY: finalY + 5,
+                        theme: 'grid',
+                        styles: { font: 'Sarabun', fontSize: 10 },
+                        headStyles: { fillColor: [0, 0, 0] },
+                        tableWidth: 80
+                    });
+                }
+
+                doc.save(`report_${printView}.pdf`);
+                setIsExporting(false);
+            };
+
+            const stats = useMemo(() => {
+                const totalOrders = orders.length;
+                const sizeDistribution = SIZES.map(size => ({ name: size, value: orders.filter(o => o.size === size).length })).filter(d => d.value > 0);
+                const styleDistribution = BACK_STYLES.map(style => ({ name: style.label, value: orders.filter(o => o.backStyle === style.id).length })).filter(d => d.value > 0);
+                return { totalOrders, sizeDistribution, styleDistribution };
+            }, [orders]);
+
+            useEffect(() => { hideLoading(); }, []);
+
+            if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-white">Loading...</div>;
+            if (!user) return <Login onLoginSuccess={() => {}} />;
+
+            return (
+                <div className="flex h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-slate-100 font-sans overflow-hidden">
+                    {isExporting && (
+                        <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-[9999]">
+                            <div className="bg-white text-black p-6 rounded-xl flex items-center gap-4">
+                                <Loader className="animate-spin text-blue-500" /> กำลังสร้าง PDF...
+                            </div>
+                        </div>
+                    )}
+                    <aside className="w-20 lg:w-64 flex flex-col bg-white/5 backdrop-blur-xl border-r border-white/10 transition-all duration-300 no-print">
+                        <div className="p-6 flex items-center justify-center lg:justify-start gap-4">
+                            <div className="bg-gradient-to-tr from-pink-500 to-violet-500 p-2 rounded-xl shadow-lg"><Shirt className="text-white" size={24} /></div>
+                            <span className="text-xl font-bold hidden lg:block tracking-wide">ShirtSys</span>
+                        </div>
+                        <nav className="flex-1 px-4 py-6 space-y-2">
+                            {[{ id: 'dashboard', icon: LayoutDashboard, label: 'แดชบอร์ด' }, { id: 'students', icon: Users, label: 'รายชื่อนักเรียน' }, { id: 'orders', icon: CheckCircle, label: 'สั่งซื้อเสื้อ' }, { id: 'summary', icon: Layers, label: 'สรุปข้อมูล' }, { id: 'print', icon: Printer, label: 'พิมพ์รายงาน' },].map((item) => (
+                                <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${activeTab === item.id ? 'bg-gradient-to-r from-pink-500/20 to-violet-500/20 border border-pink-500/30 text-pink-300' : 'hover:bg-white/5 text-slate-400 hover:text-white'}`}>
+                                    <item.icon size={20} className={activeTab === item.id ? 'text-pink-400' : 'group-hover:text-white'} /> <span className="hidden lg:block font-medium">{item.label}</span>
+                                </button>
+                            ))}
+                        </nav>
+                        <div className="p-4 border-t border-white/10"><button onClick={() => signOut(auth)} className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-slate-400 hover:bg-red-500/10 hover:text-red-400 transition-all"><LogOut size={20} /><span className="hidden lg:block">ออกจากระบบ</span></button></div>
+                    </aside>
+
+                    <main className="flex-1 overflow-y-auto">
+                        <header className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur-md border-b border-white/10 px-8 py-4 flex justify-between items-center no-print">
+                            <h2 className="text-2xl font-bold bg-gradient-to-r from-pink-400 to-violet-400 bg-clip-text text-transparent">{activeTab === 'dashboard' && 'แดชบอร์ดภาพรวม'}{activeTab === 'students' && 'จัดการรายชื่อนักเรียน'}{activeTab === 'orders' && 'บันทึกการสั่งซื้อ'}{activeTab === 'summary' && 'สรุปข้อมูลสั่งจอง'}{activeTab === 'print' && 'พิมพ์รายงาน'}</h2>
+                            <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/10"><User size={16} className="text-pink-400" /><span className="text-sm font-medium">{user.email}</span></div>
+                        </header>
+
+                        <div className="p-8">
+                            {submitStatus.msg && (
+                                <div className={`fixed top-20 right-8 z-50 px-6 py-4 rounded-xl shadow-2xl backdrop-blur-xl border flex items-center gap-3 animate-bounce-in ${submitStatus.type === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-200' : 'bg-red-500/20 border-red-500/50 text-red-200'}`}>
+                                    {submitStatus.type === 'success' ? <CheckCircle size={20} /> : <AlertCircle size={20} />} {submitStatus.msg} <button onClick={() => setSubmitStatus({type: '', msg: ''})} className="ml-4 hover:text-white">x</button>
+                                </div>
+                            )}
+
+                            {activeTab === 'dashboard' && (
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                        <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-6 rounded-2xl shadow-xl"><p className="text-slate-400 text-sm">ยอดสั่งจอง</p><h3 className="text-4xl font-bold mt-2">{stats.totalOrders} <span className="text-lg text-slate-500 font-normal">ตัว</span></h3></div>
+                                        <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-6 rounded-2xl shadow-xl"><p className="text-slate-400 text-sm">ไซต์ยอดนิยม</p><h3 className="text-4xl font-bold mt-2">{stats.sizeDistribution.sort((a,b) => b.value - a.value)[0]?.name || '-'}</h3></div>
+                                        <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-6 rounded-2xl shadow-xl"><p className="text-slate-400 text-sm">นักเรียน</p><h3 className="text-4xl font-bold mt-2">{students.length} <span className="text-lg text-slate-500 font-normal">คน</span></h3></div>
+                                    </div>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-6 rounded-2xl shadow-xl h-96"><h3 className="text-lg font-semibold mb-6">สัดส่วนขนาดเสื้อ</h3><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={stats.sizeDistribution} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">{stats.sizeDistribution.map((e, i) => <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />)}</Pie><RechartsTooltip contentStyle={{backgroundColor:'#1e293b', border:'none', borderRadius:'8px', color:'#fff'}} /><Legend /></PieChart></ResponsiveContainer></div>
+                                        <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-6 rounded-2xl shadow-xl h-96"><h3 className="text-lg font-semibold mb-6">รูปแบบด้านหลัง</h3><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={stats.styleDistribution} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">{stats.styleDistribution.map((e, i) => <Cell key={`cell-${i}`} fill={COLORS[(i+3) % COLORS.length]} />)}</Pie><RechartsTooltip contentStyle={{backgroundColor:'#1e293b', border:'none', borderRadius:'8px', color:'#fff'}} /><Legend /></PieChart></ResponsiveContainer></div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'students' && (
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                    <div className="lg:col-span-1">
+                                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-2xl shadow-lg sticky top-24">
+                                            <div className="mb-8 p-4 bg-white/5 rounded-xl border border-white/10 border-dashed text-center"><input type="file" accept=".csv" ref={studentFileRef} onChange={handleStudentImport} className="hidden" /><button onClick={() => studentFileRef.current?.click()} className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 mb-2"><Upload size={14} /> นำเข้า CSV</button><p className="text-[10px] text-slate-500">Format: ID, คำนำ, ชื่อ, สกุล, ชั้น, ห้อง, เลขที่</p></div>
+                                            <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Plus className="text-pink-400" /> เพิ่มรายชื่อ</h3>
+                                            <form onSubmit={handleAddStudent} className="space-y-4">
+                                                <input type="text" required placeholder="เลขประจำตัว" className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 focus:border-pink-500 outline-none" value={formStudent.studentId} onChange={e => setFormStudent({...formStudent, studentId: e.target.value})} />
+                                                <div className="grid grid-cols-3 gap-2"><select className="bg-slate-900/50 border border-white/10 rounded-lg px-2 py-2 outline-none" value={formStudent.title} onChange={e => setFormStudent({...formStudent, title: e.target.value})}><option>ด.ช.</option><option>ด.ญ.</option><option>นาย</option><option>น.ส.</option></select><input type="text" required placeholder="ชื่อ" className="col-span-2 bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 outline-none" value={formStudent.firstName} onChange={e => setFormStudent({...formStudent, firstName: e.target.value})} /></div>
+                                                <input type="text" required placeholder="นามสกุล" className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 outline-none" value={formStudent.lastName} onChange={e => setFormStudent({...formStudent, lastName: e.target.value})} />
+                                                <div className="grid grid-cols-3 gap-2"><input type="text" required placeholder="ชั้น" className="bg-slate-900/50 border border-white/10 rounded-lg px-2 py-2 outline-none text-center" value={formStudent.grade} onChange={e => setFormStudent({...formStudent, grade: e.target.value})} /><input type="text" required placeholder="ห้อง" className="bg-slate-900/50 border border-white/10 rounded-lg px-2 py-2 outline-none text-center" value={formStudent.room} onChange={e => setFormStudent({...formStudent, room: e.target.value})} /><select required className="bg-slate-900/50 border border-white/10 rounded-lg px-2 py-2 outline-none text-center" value={formStudent.number} onChange={e => setFormStudent({...formStudent, number: e.target.value})}>{NUMBER_OPTIONS.map(num => <option key={num} value={num}>{num}</option>)}</select></div>
+                                                <button type="submit" className="w-full bg-pink-500 hover:bg-pink-600 text-white font-semibold py-3 rounded-xl shadow-lg">บันทึก</button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                    <div className="lg:col-span-2">
+                                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-lg overflow-hidden">
+                                            <div className="p-4 bg-white/5 border-b border-white/10"><h3 className="font-semibold">รายชื่อ ({students.length})</h3></div>
+                                            <div className="overflow-x-auto max-h-[600px]"><table className="w-full text-left text-sm text-slate-300"><thead className="bg-white/5 text-slate-100 uppercase sticky top-0 z-10 backdrop-blur-md"><tr><th className="px-6 py-3">ID</th><th className="px-6 py-3">ชื่อ-สกุล</th><th className="px-6 py-3">เลขที่</th><th className="px-6 py-3">สถานะ</th><th className="px-6 py-3">Action</th></tr></thead><tbody className="divide-y divide-white/5">{students.sort((a,b) => parseInt(a.number)-parseInt(b.number)).map(s => <tr key={s.id} className="hover:bg-white/5"><td className="px-6 py-3">{s.studentId}</td><td className="px-6 py-3">{s.title}{s.firstName} {s.lastName}</td><td className="px-6 py-3">{s.number}</td><td className="px-6 py-3">{getOrderStatus(s.studentId) ? <span className="text-green-400 font-bold flex gap-1"><CheckCircle size={14}/> สั่งแล้ว</span> : <span className="text-red-400 flex gap-1"><X size={14}/> ยังไม่สั่ง</span>}</td><td className="px-6 py-3"><button className="text-red-400" onClick={() => deleteDoc(doc(db, 'students', s.id))}><Trash2 size={16}/></button></td></tr>)}</tbody></table></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'orders' && (
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                    <div className="lg:col-span-1">
+                                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-2xl shadow-lg sticky top-24">
+                                            <div className="mb-8 p-4 bg-white/5 rounded-xl border border-white/10 border-dashed text-center"><input type="file" accept=".csv" ref={orderFileRef} onChange={handleOrderImport} className="hidden" /><button onClick={() => orderFileRef.current?.click()} className="w-full py-2 bg-violet-700 hover:bg-violet-600 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 mb-2"><Upload size={14} /> นำเข้า Google Forms</button></div>
+                                            <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><Shirt className="text-violet-400" /> {editingId ? 'แก้ไขข้อมูล' : 'สั่งจอง'}</h3>
+                                            <form onSubmit={handleSaveOrder} className="space-y-4">
+                                                <div className="flex gap-2"><input type="text" placeholder="ID ค้นหา" className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 focus:border-violet-500 outline-none" value={formOrder.studentId} onChange={e => { const val = e.target.value; setFormOrder({...formOrder, studentId: val}); const found = students.find(s => s.studentId === val); if(found) setFormOrder(prev => ({...prev, studentId: val, number: found.number})); }} /></div>
+                                                {students.find(s => s.studentId === formOrder.studentId) && <p className="text-green-400 text-xs">พบ: {students.find(s => s.studentId === formOrder.studentId)?.firstName}</p>}
+                                                <div className="grid grid-cols-3 gap-2"><select className="bg-slate-900/50 border border-white/10 rounded-lg px-2 py-2 outline-none" value={formOrder.title} onChange={e => setFormOrder({...formOrder, title: e.target.value})}><option>Mr.</option><option>Miss</option><option>Mrs.</option></select><input type="text" required placeholder="Eng Name" className="col-span-2 bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 outline-none" value={formOrder.engName} onChange={e => setFormOrder({...formOrder, engName: e.target.value})} /></div>
+                                                <input type="text" required placeholder="Eng Surname" className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 outline-none" value={formOrder.engSurname} onChange={e => setFormOrder({...formOrder, engSurname: e.target.value})} />
+                                                <div className="grid grid-cols-2 gap-4"><select required className="bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 outline-none text-center" value={formOrder.number} onChange={e => setFormOrder({...formOrder, number: e.target.value})}>{NUMBER_OPTIONS.map(num => <option key={num} value={num}>{num}</option>)}</select><select className="bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 outline-none" value={formOrder.size} onChange={e => setFormOrder({...formOrder, size: e.target.value})}>{SIZES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                                                <select className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 outline-none" value={formOrder.backStyle} onChange={e => setFormOrder({...formOrder, backStyle: e.target.value})}>{BACK_STYLES.map(style => <option key={style.id} value={style.id}>{style.label}</option>)}</select>
+                                                
+                                                {/* --- NEW CHECKBOX --- */}
+                                                <div className="flex items-center gap-2 bg-slate-900/30 p-2 rounded-lg border border-white/5">
+                                                    <input type="checkbox" id="isUppercase" className="w-4 h-4 text-violet-600 rounded bg-slate-800 border-white/20 focus:ring-violet-500 cursor-pointer" checked={formOrder.isUppercase} onChange={e => setFormOrder({...formOrder, isUppercase: e.target.checked})} />
+                                                    <label htmlFor="isUppercase" className="text-sm text-slate-300 cursor-pointer flex items-center gap-1"><Type size={14}/> ตัวพิมพ์ใหญ่ (ALL CAPS)</label>
+                                                </div>
+
+                                                <div className="flex gap-2">{editingId && <button type="button" onClick={handleCancelEdit} className="w-1/3 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-3 rounded-xl shadow-lg">ยกเลิก</button>}<button type="submit" className={`flex-1 ${editingId ? 'bg-orange-600 hover:bg-orange-700' : 'bg-violet-600 hover:bg-violet-700'} text-white font-semibold py-3 rounded-xl shadow-lg`}>{editingId ? 'บันทึกแก้ไข' : 'ยืนยัน'}</button></div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                    <div className="lg:col-span-2">
+                                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-lg overflow-hidden">
+                                            <div className="p-4 bg-white/5 border-b border-white/10"><h3 className="font-semibold">รายการล่าสุด ({orders.length})</h3></div>
+                                            <div className="overflow-x-auto max-h-[700px]"><table className="w-full text-left text-sm text-slate-300"><thead className="bg-white/5 text-slate-100 uppercase sticky top-0 z-10 backdrop-blur-md"><tr><th className="px-6 py-3">เลขที่</th><th className="px-6 py-3">ชื่อ (Eng)</th><th className="px-6 py-3 text-center">Size</th><th className="px-6 py-3 text-center">Back</th><th className="px-6 py-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-white/5">{orders.map(o => <tr key={o.id} className={`hover:bg-white/5 ${editingId === o.id ? 'bg-orange-500/10' : ''}`}><td className="px-6 py-3 font-mono">{o.number}</td><td className="px-6 py-3">{o.title} {getScreenName(o)} {o.engSurname}</td><td className="px-6 py-3 text-center">{o.size}</td><td className="px-6 py-3 text-center text-xs opacity-70">{BACK_STYLES.find(b => b.id === o.backStyle)?.label}</td><td className="px-6 py-3 text-right flex justify-end gap-2"><button onClick={() => handleEditOrder(o)} className="text-slate-500 hover:text-orange-400"><Edit size={16}/></button><button onClick={() => handleDeleteOrder(o.id)} className="text-slate-500 hover:text-red-400"><Trash2 size={16}/></button></td></tr>)}</tbody></table></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'summary' && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-lg"><h3 className="text-xl font-bold mb-4 text-pink-300">สรุปยอดตามไซส์</h3><div className="space-y-3">{SIZES.map(size => { const count = orders.filter(o => o.size === size).length; const percentage = orders.length > 0 ? (count / orders.length) * 100 : 0; return <div key={size} className="flex items-center gap-4"><div className="w-12 font-bold text-center bg-white/10 rounded py-1">{size}</div><div className="flex-1 h-3 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-pink-500 to-violet-500" style={{width: `${percentage}%`}}></div></div><div className="w-16 text-right font-mono">{count} ตัว</div></div> })}<div className="pt-4 mt-4 border-t border-white/10 flex justify-between font-bold text-lg"><span>รวม</span><span>{orders.length} ตัว</span></div></div></div>
+                                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-lg"><h3 className="text-xl font-bold mb-4 text-violet-300">สรุปรูปแบบหลังเสื้อ</h3><div className="space-y-3">{BACK_STYLES.map(style => <div key={style.id} className="flex justify-between items-center p-3 bg-white/5 rounded-lg border border-white/5"><span className="text-sm">{style.label}</span><span className="font-bold font-mono bg-violet-500/20 text-violet-300 px-3 py-1 rounded-md">{orders.filter(o => o.backStyle === style.id).length}</span></div>)}</div></div>
+                                </div>
+                            )}
+
+                            {activeTab === 'print' && (
+                                <div className="space-y-8">
+                                    <div className="flex flex-col md:flex-row gap-6 justify-between items-start md:items-center no-print bg-white/5 p-6 rounded-2xl border border-white/10">
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 bg-slate-900/50 p-1 rounded-lg border border-white/10 w-full md:w-auto">
+                                            <button onClick={() => setPrintView('production')} className={`px-2 py-2 rounded-md text-xs md:text-sm font-medium transition-all ${printView === 'production' ? 'bg-pink-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>1. ใบสั่งผลิต</button>
+                                            <button onClick={() => setPrintView('namelist')} className={`px-2 py-2 rounded-md text-xs md:text-sm font-medium transition-all ${printView === 'namelist' ? 'bg-violet-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>2. ใบเช็คชื่อ</button>
+                                            <button onClick={() => setPrintView('class_all')} className={`px-2 py-2 rounded-md text-xs md:text-sm font-medium transition-all ${printView === 'class_all' ? 'bg-blue-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>3. ทั้งห้อง</button>
+                                            <button onClick={() => setPrintView('missing')} className={`px-2 py-2 rounded-md text-xs md:text-sm font-medium transition-all ${printView === 'missing' ? 'bg-red-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>4. ยังไม่สั่ง</button>
+                                            <button onClick={() => setPrintView('size_summary')} className={`px-2 py-2 rounded-md text-xs md:text-sm font-medium transition-all ${printView === 'size_summary' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>5. รวมไซต์</button>
+                                            <button onClick={() => setPrintView('back_style')} className={`px-2 py-2 rounded-md text-xs md:text-sm font-medium transition-all ${printView === 'back_style' ? 'bg-teal-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>6. แยกตามหลัง</button>
+                                        </div>
+                                        
+                                        <div className="flex flex-col md:flex-row gap-4 items-end md:items-center">
+                                            {/* --- Global Uppercase Toggle --- */}
+                                            <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-2 rounded-lg border border-white/10">
+                                                <input type="checkbox" id="globalUppercase" className="w-4 h-4 text-pink-600 rounded bg-slate-700 border-white/20 focus:ring-pink-500 cursor-pointer" checked={forceUppercase} onChange={e => setForceUppercase(e.target.checked)} />
+                                                <label htmlFor="globalUppercase" className="text-sm text-white cursor-pointer select-none">บังคับพิมพ์ใหญ่ทั้งหมด</label>
+                                            </div>
+
+                                            <div className="flex gap-2">
+                                                <button onClick={handleExportCSV} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-semibold shadow-lg transition-all text-sm"><FileSpreadsheet size={16} /> CSV</button>
+                                                <button onClick={handleExportImage} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-semibold shadow-lg transition-all text-sm"><ImageIcon size={16} /> PNG</button>
+                                                <button onClick={handleExportPDF} className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg font-semibold shadow-lg transition-all text-sm"><FileText size={16} /> PDF</button>
+                                                <button onClick={() => window.print()} className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-lg font-semibold shadow-lg transition-all text-sm"><Printer size={16} /></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="print-container bg-white text-black p-8 rounded-xl shadow-2xl min-h-screen">
+                                        <div className="text-center border-b-2 border-black pb-4 mb-6"><h1 className="text-2xl font-bold">รายงานสรุปการสั่งจองเสื้อรุ่น 91</h1><p className="text-gray-600">วันที่พิมพ์: {new Date().toLocaleDateString('th-TH')}</p></div>
+                                        
+                                        {printView === 'production' && SIZES.map(size => { const sizeOrders = orders.filter(o => o.size === size); if(sizeOrders.length === 0) return null; return <div key={size} className="mb-8 break-inside-avoid"><h3 className="font-bold text-lg border-b-2 border-gray-400 mb-2 flex justify-between bg-gray-50 px-2 py-1"><span>SIZE: {size}</span><span>{sizeOrders.length} ตัว</span></h3><table className="w-full text-sm border-collapse border border-gray-300"><thead><tr className="bg-gray-200"><th className="w-12 text-center">ลำดับ</th><th>ชื่อสกรีน</th><th className="w-40 text-center">เลขหลัง</th><th className="w-24">หมายเหตุ</th></tr></thead><tbody>{sizeOrders.map((o,i)=><tr key={o.id}><td className="text-center border border-gray-300 p-1">{i+1}</td><td className="border border-gray-300 p-1 font-mono">{getScreenName(o)}</td><td className="text-center border border-gray-300 p-1">{getBackDetail(o, findStudentForOrder(o))}</td><td className="border border-gray-300 p-1"></td></tr>)}</tbody></table></div> })}
+                                        
+                                        {printView === 'namelist' && <div className="break-before-page"><div className="bg-gray-100 p-2 border-l-4 border-black mb-4"><h2 className="text-xl font-bold">2. ใบเช็คชื่อผู้สั่งจอง</h2></div><table className="w-full text-sm border-collapse border border-black"><thead><tr className="bg-gray-800 text-white"><th className="w-16">เลขที่</th><th>ชื่อ-สกุล</th><th className="w-16">Size</th><th>ชื่อสกรีน</th><th className="w-24">หลัง</th><th className="w-24">ลายเซ็น</th></tr></thead><tbody>{orders.sort((a,b)=>parseInt(a.number)-parseInt(b.number)).map(o=><tr key={o.id}><td className="text-center border border-black p-1">{o.number}</td><td className="border border-black p-1">{(() => { const st = findStudentForOrder(o); return st ? `${st.title}${st.firstName} ${st.lastName}` : '-'; })()}</td><td className="text-center border border-black p-1 font-bold">{o.size}</td><td className="border border-black p-1 font-mono">{getScreenName(o)}</td><td className="text-center border border-black p-1">{getBackDetail(o, findStudentForOrder(o))}</td><td className="border border-black p-1"></td></tr>)}</tbody></table></div>}
+                                        
+                                        {printView === 'class_all' && <div className="break-before-page"><div className="bg-gray-100 p-2 border-l-4 border-black mb-4"><h2 className="text-xl font-bold">3. รายงานทั้งห้อง (เช็คสถานะ)</h2></div><table className="w-full text-sm border-collapse border border-black"><thead><tr className="bg-gray-800 text-white"><th className="w-16">เลขที่</th><th>ชื่อ-สกุล</th><th className="w-16">Size</th><th>ชื่อสกรีน</th><th className="w-24">หลัง</th><th className="w-24">สถานะ</th></tr></thead><tbody>{[...students].sort((a,b)=>parseInt(a.number)-parseInt(b.number)).map(st=>{ const o = findOrderForStudent(st); return <tr key={st.id}><td className="text-center border border-black p-1">{st.number}</td><td className="border border-black p-1">{st.title}{st.firstName} {st.lastName}</td><td className="text-center border border-black p-1">{o?o.size:'-'}</td><td className="border border-black p-1 font-mono">{o?getScreenName(o):'-'}</td><td className="text-center border border-black p-1">{o?getBackDetail(o, st):'-'}</td><td className={`text-center border border-black p-1 font-bold ${o?'text-green-600':'text-red-500 bg-red-50'}`}>{o?'✓':'ขาด'}</td></tr> })}</tbody></table><div className="mt-4 text-right font-bold">สั่งแล้ว: {orders.length} | ขาด: {students.length - orders.length}</div></div>}
+                                        
+                                        {printView === 'missing' && <div className="break-before-page"><div className="bg-gray-100 p-2 border-l-4 border-red-500 mb-4"><h2 className="text-xl font-bold text-red-600">4. รายชื่อผู้ที่ยังไม่สั่งจอง</h2></div><table className="w-full text-sm border-collapse border border-black"><thead><tr className="bg-gray-800 text-white"><th className="w-16">เลขที่</th><th>ชื่อ-สกุล</th><th className="w-24">ชั้น/ห้อง</th><th className="w-24">หมายเหตุ</th></tr></thead><tbody>{[...students].sort((a,b)=>parseInt(a.number)-parseInt(b.number)).filter(st=>!findOrderForStudent(st)).map(st=><tr key={st.id}><td className="text-center border border-black p-1">{st.number}</td><td className="border border-black p-1">{st.title}{st.firstName} {st.lastName}</td><td className="text-center border border-black p-1">ม.{st.grade}/{st.room}</td><td className="border border-black p-1"></td></tr>)}</tbody></table><div className="mt-4 text-right font-bold text-red-600">รวมยอดขาด: {students.length - orders.length} คน</div></div>}
+
+                                        {printView === 'size_summary' && (
+                                            <div className="break-before-page">
+                                                <div className="bg-gray-100 p-2 border-l-4 border-purple-500 mb-4 flex justify-between"><h2 className="text-xl font-bold text-purple-700">5. รายงานสรุปยอดรวมตามไซต์</h2><span>รวม: {orders.length}</span></div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                    {SIZES.map(size => {
+                                                        const sizeOrders = orders.filter(o => o.size === size);
+                                                        if (sizeOrders.length === 0) return null;
+                                                        return (
+                                                            <div key={size} className="mb-6 break-inside-avoid border border-gray-200 rounded p-4">
+                                                                <h3 className="font-bold text-lg mb-2 border-b border-gray-300 pb-1 flex justify-between"><span>SIZE: {size}</span><span className="bg-purple-100 text-purple-800 px-2 rounded text-sm">{sizeOrders.length} ตัว</span></h3>
+                                                                <table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-1 w-10">#</th><th className="p-1">ชื่อสกรีน</th><th className="p-1 w-20 text-center">เลขหลัง</th></tr></thead><tbody>{sizeOrders.map((o, i) => <tr key={o.id} className="border-b border-gray-100"><td className="p-1 text-gray-500">{i+1}</td><td className="p-1 font-mono">{getScreenName(o)}</td><td className="p-1 text-center">{getBackDetail(o, findStudentForOrder(o))}</td></tr>)}</tbody></table>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <div className="mt-8 break-inside-avoid w-64">
+                                                    <h3 className="font-bold text-lg mb-2">สรุปจำนวนรวม</h3>
+                                                    <table className="w-full text-sm border-collapse border border-black">
+                                                        <thead className="bg-gray-800 text-white"><tr><th className="border border-black p-2 text-center">ไซต์</th><th className="border border-black p-2 text-center">จำนวน</th></tr></thead>
+                                                        <tbody>
+                                                            {SIZES.map(size => {
+                                                                const count = orders.filter(o => o.size === size).length;
+                                                                if (count === 0) return null;
+                                                                return <tr key={size}><td className="border border-black p-2 text-center font-bold">{size}</td><td className="border border-black p-2 text-center">{count}</td></tr>;
+                                                            })}
+                                                            <tr className="bg-gray-200 font-bold"><td className="border border-black p-2 text-center">รวม</td><td className="border border-black p-2 text-center">{orders.length}</td></tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {printView === 'back_style' && (
+                                            <div className="break-before-page">
+                                                <div className="bg-gray-100 p-2 border-l-4 border-teal-500 mb-4"><h2 className="text-xl font-bold text-teal-700">6. รายงานแยกตามรูปแบบหลังเสื้อ</h2></div>
+                                                <div className="grid grid-cols-1 gap-6">
+                                                    {BACK_STYLES.map(style => {
+                                                        const styleOrders = orders.filter(o => o.backStyle === style.id);
+                                                        if (styleOrders.length === 0) return null;
+                                                        return (
+                                                            <div key={style.id} className="mb-6 break-inside-avoid border border-gray-200 rounded p-4">
+                                                                <h3 className="font-bold text-lg mb-2 border-b border-gray-300 pb-1 flex justify-between bg-gray-50 p-2">
+                                                                    <span>{style.label}</span>
+                                                                    <span className="bg-teal-100 text-teal-800 px-2 rounded text-sm">{styleOrders.length} ตัว</span>
+                                                                </h3>
+                                                                <table className="w-full text-sm border-collapse border border-gray-300">
+                                                                    <thead><tr className="bg-gray-100"><th className="border border-gray-300 p-1 w-12 text-center">#</th><th className="border border-gray-300 p-1">ชื่อสกรีน</th><th className="border border-gray-300 p-1 w-16 text-center">Size</th><th className="border border-gray-300 p-1 w-24 text-center">เลขหลัง</th></tr></thead>
+                                                                    <tbody>
+                                                                        {styleOrders.map((o, i) => (
+                                                                            <tr key={o.id}>
+                                                                                <td className="border border-gray-300 p-1 text-center">{i+1}</td>
+                                                                                <td className="border border-gray-300 p-1 font-mono">{getScreenName(o)}</td>
+                                                                                <td className="border border-gray-300 p-1 text-center font-bold">{o.size}</td>
+                                                                                <td className="border border-gray-300 p-1 text-center">{getBackDetail(o, findStudentForOrder(o))}</td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
